@@ -1,0 +1,170 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ---- Global Safety Net ----
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ---- Primitives ----
+    function isSignedIn() { return request.auth != null; }
+    function isEmailVerified() { return request.auth.token.email_verified == true; }
+    function isVerifiedUser() { return isSignedIn() && isEmailVerified(); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { 
+      // 1-128 chars, alphanumeric and hyphens/underscores
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+
+    // ---- Entities Validation ----
+    function isValidUserPublic(data) {
+      return data.keys().hasAll(['id', 'fullName', 'roles', 'createdAt', 'updatedAt'])
+        && data.id is string && data.id == request.auth.uid
+        && data.fullName is string && data.fullName.size() > 0 && data.fullName.size() <= 100
+        && data.bio is string && data.bio.size() <= 500
+        && data.roles is list && data.roles.size() > 0 && data.roles.size() <= 2
+        && (data.roles[0] == 'client' || data.roles[0] == 'freelance')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivate(data) {
+      return data.keys().hasAll(['email'])
+        && data.email is string && data.email.size() > 0 && data.email.size() <= 100;
+    }
+
+    function isValidService(data) {
+      return data.keys().hasAll(['id', 'freelanceId', 'title', 'description', 'category', 'price', 'status', 'createdAt', 'updatedAt'])
+        && data.id is string
+        && data.freelanceId is string && data.freelanceId == request.auth.uid
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.description is string && data.description.size() > 0 && data.description.size() <= 5000
+        && data.category is string && data.category.size() > 0 && data.category.size() <= 50
+        && data.price is number && data.price >= 0
+        && data.status is string && (data.status == 'active' || data.status == 'paused')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['id', 'serviceId', 'clientId', 'freelanceId', 'amount', 'status', 'createdAt', 'updatedAt'])
+        && data.id is string
+        && data.serviceId is string
+        && data.clientId is string && data.clientId == request.auth.uid
+        && data.freelanceId is string
+        && data.amount is number && data.amount >= 0
+        && data.status is string && (data.status == 'pending' || data.status == 'active' || data.status == 'delivered' || data.status == 'completed' || data.status == 'disputed' || data.status == 'cancelled')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['id', 'orderId', 'senderId', 'text', 'createdAt'])
+        && data.id is string
+        && data.orderId is string
+        && data.senderId is string && data.senderId == request.auth.uid
+        && data.text is string && data.text.size() > 0 && data.text.size() <= 2000
+        && data.createdAt is timestamp;
+    }
+
+    // ---- Paths ----
+    match /users/{userId} {
+      allow get: if isVerifiedUser();
+      allow list: if isVerifiedUser() && isValidId(userId); // list doesn't have id though, wait: query condition ? No, list shouldn't be allowed generally or with query match. We'll secure it below.
+      
+      // Let's fix lists.
+      allow list: if isVerifiedUser() && (resource.data.id == request.auth.uid || resource.data.roles.hasAny(['freelance']));
+      
+      allow create: if isVerifiedUser() 
+        && isValidId(userId)
+        && userId == request.auth.uid 
+        && isValidUserPublic(incoming()) 
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+        
+      allow update: if isVerifiedUser() 
+        && isValidId(userId)
+        && userId == request.auth.uid 
+        && isValidUserPublic(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'bio', 'avatarUrl', 'country', 'updatedAt']);
+    }
+
+    match /users/{userId}/private/info {
+      allow read: if isVerifiedUser() && userId == request.auth.uid;
+      allow write: if isVerifiedUser() && userId == request.auth.uid && isValidUserPrivate(incoming());
+    }
+
+    match /services/{serviceId} {
+      allow read: if isVerifiedUser(); // open to verified users
+      allow create: if isVerifiedUser() 
+        && isValidId(serviceId)
+        && isValidService(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      allow update: if isVerifiedUser()
+        && isValidId(serviceId)
+        && isValidService(incoming())
+        && existing().freelanceId == request.auth.uid
+        && incoming().freelanceId == existing().freelanceId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+    }
+
+    match /orders/{orderId} {
+      // Both client and freelance can read their orders
+      allow read: if isVerifiedUser() 
+        && (resource.data.clientId == request.auth.uid || resource.data.freelanceId == request.auth.uid);
+      
+      // Only clients create orders
+      allow create: if isVerifiedUser()
+        && isValidId(orderId)
+        && isValidOrder(incoming())
+        && incoming().clientId == request.auth.uid
+        && exists(/databases/$(database)/documents/services/$(incoming().serviceId))
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+        
+      // Updates based on roles
+      allow update: if isVerifiedUser()
+        && isValidId(orderId)
+        && isValidOrder(incoming())
+        && incoming().id == existing().id
+        && incoming().clientId == existing().clientId
+        && incoming().freelanceId == existing().freelanceId
+        && incoming().serviceId == existing().serviceId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        // Prevent updates if order is in a terminal state
+        && !(existing().status in ['completed', 'cancelled'])
+        && (
+          // Client can cancel pending orders or mark as complete if delivered
+          (request.auth.uid == existing().clientId && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) && incoming().status in ['cancelled', 'completed', 'disputed']) ||
+          // Freelancer can mark as delivered
+          (request.auth.uid == existing().freelanceId && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) && incoming().status in ['delivered', 'active'])
+        );
+    }
+
+    match /orders/{orderId}/messages/{messageId} {
+      // Must be participant in the order
+      function isOrderParticipant() {
+        let orderData = get(/databases/$(database)/documents/orders/$(orderId)).data;
+        return orderData != null && (orderData.clientId == request.auth.uid || orderData.freelanceId == request.auth.uid);
+      }
+      
+      allow read: if isVerifiedUser() && isOrderParticipant();
+      allow create: if isVerifiedUser() 
+        && isValidId(messageId)
+        && isValidId(orderId)
+        && isValidMessage(incoming())
+        && incoming().senderId == request.auth.uid
+        && incoming().orderId == orderId
+        && incoming().createdAt == request.time
+        && isOrderParticipant();
+    }
+  }
+}

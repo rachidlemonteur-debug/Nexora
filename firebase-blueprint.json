@@ -1,0 +1,109 @@
+{
+  "entities": {
+    "UserPublic": {
+      "title": "User Public Profile",
+      "description": "Public information about a user (freelance or client).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "User ID, must match auth.uid" },
+        "fullName": { "type": "string" },
+        "bio": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "country": { "type": "string" },
+        "roles": { 
+          "type": "array", 
+          "items": { "type": "string", "enum": ["client", "freelance"] } 
+        },
+        "rating": { "type": "number" },
+        "reviewCount": { "type": "number" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["id", "fullName", "roles", "createdAt", "updatedAt"]
+    },
+    "UserPrivate": {
+      "title": "User Private Info",
+      "description": "PII and sensitive information.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "mobileMoneyNumber": { "type": "string" }
+      },
+      "required": ["email"]
+    },
+    "Service": {
+      "title": "Freelance Service",
+      "description": "A packaged service offered by a freelance.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "freelanceId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "price": { "type": "number" },
+        "deliveryDays": { "type": "number" },
+        "revisions": { "type": "number" },
+        "thumbnailUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "paused"] },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["id", "freelanceId", "title", "description", "category", "price", "status", "createdAt", "updatedAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "An order placed for a service.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "serviceId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "freelanceId": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "active", "delivered", "completed", "disputed", "cancelled"] },
+        "briefing": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["id", "serviceId", "clientId", "freelanceId", "amount", "status", "createdAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Order Message",
+      "description": "A message within an order.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["id", "orderId", "senderId", "text", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPublic" },
+      "description": "Public user profiles."
+    },
+    "users/{userId}/private/info": {
+      "schema": { "$ref": "#/entities/UserPrivate" },
+      "description": "Private PII data for users."
+    },
+    "services/{serviceId}": {
+      "schema": { "$ref": "#/entities/Service" },
+      "description": "Services published by freelancers."
+    },
+    "orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Orders including escrow status."
+    },
+    "orders/{orderId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Chat messages for a specific order."
+    }
+  }
+}

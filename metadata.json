@@ -1,0 +1,6 @@
+{
+  "name": "Freelancia",
+  "description": "La marketplace freelance sécurisée d'Afrique francophone.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
